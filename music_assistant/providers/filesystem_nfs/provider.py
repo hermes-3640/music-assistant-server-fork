@@ -22,23 +22,11 @@ from music_assistant.providers.filesystem_local import (
     ismount,
     makedirs,
 )
-from music_assistant.providers.filesystem_local.constants import (
-    CONF_CONTENT_TYPE,
-    CONF_ENTRY_CONTENT_TYPE,
-    CONF_ENTRY_IGNORE_ALBUM_PLAYLISTS,
-    CONF_ENTRY_LIBRARY_SYNC_AUDIOBOOKS,
-    CONF_ENTRY_LIBRARY_SYNC_PLAYLISTS,
-    CONF_ENTRY_LIBRARY_SYNC_PODCASTS,
-    CONF_ENTRY_LIBRARY_SYNC_TRACKS,
-    CONF_ENTRY_MISSING_ALBUM_ARTIST,
-    CONF_ENTRY_PROPAGATE_GENRES,
-    content_type_config_entry,
-)
 
 from .constants import CONF_EXPORT_PATH, CONF_HOST, CONF_NFS_VERSION, CONF_SUBFOLDER
 
 if TYPE_CHECKING:
-    from music_assistant_models.config_entries import ConfigEntry, ProviderConfig
+    from music_assistant_models.config_entries import ProviderConfig
     from music_assistant_models.provider import ProviderManifest
 
     from music_assistant.mass import MusicAssistant
@@ -82,24 +70,6 @@ class NFSFileSystemProvider(LocalFileSystemProvider):
                 translation_args=[self._subfolder],
             )
         self.base_path = os.path.normpath(os.path.join(self.mount_path, self._subfolder))
-
-    async def get_config_entries(self) -> tuple[ConfigEntry, ...]:
-        """Return Config entries to setup this provider."""
-        # connection details and content type are collected by the setup flow; surface the
-        # (immutable) content type read-only so the sync options' depends_on chains resolve
-        content_type = str(
-            self.get_setup_value(CONF_CONTENT_TYPE, CONF_ENTRY_CONTENT_TYPE.default_value)
-        )
-        return (
-            content_type_config_entry(content_type),
-            CONF_ENTRY_MISSING_ALBUM_ARTIST,
-            CONF_ENTRY_IGNORE_ALBUM_PLAYLISTS,
-            CONF_ENTRY_LIBRARY_SYNC_TRACKS,
-            CONF_ENTRY_LIBRARY_SYNC_PLAYLISTS,
-            CONF_ENTRY_LIBRARY_SYNC_PODCASTS,
-            CONF_ENTRY_LIBRARY_SYNC_AUDIOBOOKS,
-            CONF_ENTRY_PROPAGATE_GENRES,
-        )
 
     @property
     def instance_name_postfix(self) -> str | None:
@@ -160,7 +130,6 @@ class NFSFileSystemProvider(LocalFileSystemProvider):
 
         Called when provider is deregistered (e.g. MA exiting or config reloading).
         """
-        await super().unload(is_removed)
         await unmount(self.mount_path, self.logger)
 
     async def get_diagnostics(self) -> dict[str, SerializableType]:

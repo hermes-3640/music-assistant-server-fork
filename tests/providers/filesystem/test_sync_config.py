@@ -141,7 +141,7 @@ class TestProcessItemRespectsConfig:
         provider.mass.music.tracks.add_item_to_library = AsyncMock()  # type: ignore[method-assign,misc]
 
         with patch(
-            "music_assistant.providers.filesystem_local.async_parse_tags",
+            "music_assistant.providers.filesystem_local.base.async_parse_tags",
             new_callable=AsyncMock,
         ):
             result = await provider._process_item_async(item, None)
@@ -195,7 +195,7 @@ class TestProcessItemRespectsConfig:
         provider.mass.music.audiobooks.add_item_to_library = AsyncMock()  # type: ignore[method-assign,misc]
 
         with patch(
-            "music_assistant.providers.filesystem_local.async_parse_tags",
+            "music_assistant.providers.filesystem_local.base.async_parse_tags",
             new_callable=AsyncMock,
         ):
             result = await provider._process_item_async(item, None)
@@ -219,7 +219,7 @@ class TestProcessItemRespectsConfig:
         provider.mass.music.podcasts.add_item_to_library = AsyncMock()  # type: ignore[method-assign,misc]
 
         with patch(
-            "music_assistant.providers.filesystem_local.async_parse_tags",
+            "music_assistant.providers.filesystem_local.base.async_parse_tags",
             new_callable=AsyncMock,
         ):
             result = await provider._process_item_async(item, None)

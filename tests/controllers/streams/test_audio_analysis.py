@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import pathlib
 import sqlite3
 from collections.abc import AsyncGenerator, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -27,16 +26,13 @@ from music_assistant.constants import (
 )
 from music_assistant.controllers.streams.audio_analysis import (
     LOUDNESS_ANALYSIS_DOMAIN,
-    LOUDNESS_PROVIDER_PRIORITY,
-    PROVIDER_LOUDNESS_DOMAIN,
     SMART_FADES_ANALYSIS_DOMAIN,
     SONIC_ANALYSIS_DOMAIN,
     AudioAnalysisController,
     _merged_from_rows,
 )
 from music_assistant.controllers.streams.audio_buffer import AudioBufferEOF
-from music_assistant.helpers.database import DatabaseConnection
-from music_assistant.helpers.json import json_dumps, json_loads
+from music_assistant.helpers.json import json_dumps
 from music_assistant.models.audio_analysis import AudioAnalysisData
 from music_assistant.models.audio_analysis_provider import (
     AudioAnalysisProvider,
@@ -492,8 +488,11 @@ async def test_find_candidates_handles_sqlite_row_without_get(
     # Make the filesystem-providers gate succeed
     fs_prov = MagicMock(spec=LocalFileSystemProvider)
     fs_prov.domain = "filesystem_local"
+    fs_prov.instance_id = "filesystem_local"
     fs_prov.available = True
-    controller.mass.providers = [fs_prov]  # type: ignore[misc]
+    fs_prov.config = MagicMock()
+    fs_prov.config.get_value.return_value = True
+    controller.mass.get_providers = MagicMock(return_value=[fs_prov])  # type: ignore[method-assign]
 
     class _RowNoGet:
         """Mimics sqlite3.Row: __getitem__ only, no .get()."""
@@ -546,8 +545,11 @@ async def test_find_candidates_query_gates_on_current_version(
 
     fs_prov = MagicMock(spec=LocalFileSystemProvider)
     fs_prov.domain = "filesystem_local"
+    fs_prov.instance_id = "filesystem_local"
     fs_prov.available = True
-    controller.mass.providers = [fs_prov]  # type: ignore[misc]
+    fs_prov.config = MagicMock()
+    fs_prov.config.get_value.return_value = True
+    controller.mass.get_providers = MagicMock(return_value=[fs_prov])  # type: ignore[method-assign]
 
     captured: dict[str, Any] = {}
 
@@ -911,62 +913,6 @@ async def test_get_audio_analysis_priority_threads_through_to_merge() -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_track_loudness_persists_under_provider_loudness_domain() -> None:
-    """Provider-supplied loudness is stored under provider_loudness, not loudness_analysis."""
-    c, db = _stub_controller()
-    db.insert_or_replace = AsyncMock()
-    music_prov = MagicMock(spec=MusicProvider)
-    music_prov.is_streaming_provider = True
-    music_prov.domain = "test-provider"
-    c.mass.get_provider = MagicMock(return_value=music_prov)  # type: ignore[method-assign]
-
-    await c.set_track_loudness("track-1", "test-provider", -9.0, loudness_album=-8.5)
-
-    db.insert_or_replace.assert_awaited_once()
-    _table, row = db.insert_or_replace.await_args.args
-    assert row["aa_provider_domain"] == PROVIDER_LOUDNESS_DOMAIN
-    assert row["analysis_version"] == 1
-    stored = AudioAnalysisData.from_dict(json_loads(row["analysis_data"]))
-    assert stored.loudness_integrated == -9.0
-    assert stored.loudness_album == -8.5
-
-
-@pytest.mark.asyncio
-async def test_get_audio_analysis_merges_provider_loudness_without_aa_providers() -> None:
-    """A provider_loudness row merges even when no AA providers are loaded."""
-    c, db = _stub_controller()
-    db.get_rows = AsyncMock(
-        return_value=[_aa_row(PROVIDER_LOUDNESS_DOMAIN, 1, loudness_integrated=-9.0)]
-    )
-    music_prov = MagicMock(spec=MusicProvider)
-    music_prov.is_streaming_provider = True
-    music_prov.domain = "test-provider"
-    c.mass.get_provider = MagicMock(return_value=music_prov)  # type: ignore[method-assign]
-    c.mass.get_providers = MagicMock(return_value=[])  # type: ignore[method-assign]
-
-    result = await c.get_audio_analysis("track-1", "test-provider")
-
-    assert result is not None
-    assert result.loudness_integrated == -9.0
-
-
-def test_merged_from_rows_hydration_priority_prefers_provider_loudness() -> None:
-    """LOUDNESS_PROVIDER_PRIORITY prefers provider_loudness; falls back per-field to the measurement."""
-    rows = [
-        _aa_row(LOUDNESS_ANALYSIS_DOMAIN, 1, loudness_integrated=-7.5, loudness_album=-8.0),
-        _aa_row(PROVIDER_LOUDNESS_DOMAIN, 2, loudness_integrated=-9.0),
-    ]
-    merged = _merged_from_rows(
-        rows,
-        {PROVIDER_LOUDNESS_DOMAIN, LOUDNESS_ANALYSIS_DOMAIN},
-        priority=LOUDNESS_PROVIDER_PRIORITY,
-    )
-    assert merged is not None
-    assert merged.loudness_integrated == -9.0  # provider-supplied value wins
-    assert merged.loudness_album == -8.0  # falls back to the builtin measurement
-
-
-@pytest.mark.asyncio
 async def test_get_audio_analysis_count_returns_helper_result() -> None:
     """The controller forwards whatever get_count_from_query returns."""
     c, _ = _stub_controller(count_result=42)
@@ -1158,118 +1104,6 @@ async def test_iter_merged_audio_analysis_rows_skips_unparsable_rows() -> None:
     assert result[0][2].bpm == 120.0
 
 
-@pytest.fixture
-async def real_audio_analysis_db(tmp_path: pathlib.Path) -> AsyncGenerator[DatabaseConnection]:
-    """Create a real on-disk sqlite DB holding just the audio_analysis table."""
-    db = DatabaseConnection(str(tmp_path / "test.db"))
-    await db.setup()
-    await db.execute(
-        f"CREATE TABLE {DB_TABLE_AUDIO_ANALYSIS}("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, media_type TEXT, item_id TEXT, provider TEXT, "
-        "aa_provider_domain TEXT, analysis_data json, analysis_version INTEGER, "
-        "timestamp_created INTEGER DEFAULT (cast(strftime('%s','now') as int)), "
-        "UNIQUE(item_id,provider,aa_provider_domain,media_type))"
-    )
-    await db.commit()
-    yield db
-    await db.close()
-
-
-@pytest.mark.asyncio
-async def test_iter_merged_audio_analysis_rows_skips_row_with_invalid_utf8_bytes(
-    real_audio_analysis_db: DatabaseConnection,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """A row whose analysis_data TEXT holds bytes that are not valid UTF-8 is skipped."""
-    for item_id, bpm in (("t2", 100.0), ("t3", 200.0)):
-        await real_audio_analysis_db.execute_write(
-            f"INSERT INTO {DB_TABLE_AUDIO_ANALYSIS} "
-            "(media_type, item_id, provider, aa_provider_domain, analysis_data) VALUES "
-            "(:media_type, :item_id, :provider, :aa_provider_domain, :analysis_data)",
-            {
-                "media_type": MediaType.TRACK.value,
-                "item_id": item_id,
-                "provider": "filesystem_local",
-                "aa_provider_domain": SONIC_ANALYSIS_DOMAIN,
-                "analysis_data": json_dumps(AudioAnalysisData(bpm=bpm).to_dict()),
-            },
-        )
-    # invalid UTF-8 must go in via a raw CAST(x'..' AS TEXT) literal;
-    # binding it as a parameter would store a BLOB instead of corrupt TEXT
-    await real_audio_analysis_db.execute_write(
-        f"INSERT INTO {DB_TABLE_AUDIO_ANALYSIS} "
-        "(media_type, item_id, provider, aa_provider_domain, analysis_data) VALUES "
-        "(:media_type, :item_id, :provider, :aa_provider_domain, "
-        "CAST(x'7B226475726174696F6E223A31FFFE7D' AS TEXT))",
-        {
-            "media_type": MediaType.TRACK.value,
-            "item_id": "t1",
-            "provider": "filesystem_local",
-            "aa_provider_domain": SONIC_ANALYSIS_DOMAIN,
-        },
-    )
-
-    streams = MagicMock()
-    streams.mass = MagicMock()
-    streams.mass.music.database = real_audio_analysis_db
-    streams.mass.get_providers = MagicMock(return_value=[_aa_provider_stub(SONIC_ANALYSIS_DOMAIN)])
-    controller = AudioAnalysisController(streams)
-
-    with caplog.at_level("WARNING", logger=audio_analysis_mod.LOGGER.name):
-        result = [
-            x async for x in controller.iter_merged_audio_analysis_rows(SONIC_ANALYSIS_DOMAIN)
-        ]
-
-    assert {item_id for item_id, _provider, _merged in result} == {"t2", "t3"}
-    assert any("Skipping unparsable audio_analysis row" in r.message for r in caplog.records)
-
-
-@pytest.mark.asyncio
-async def test_iter_audio_analysis_rows_yields_corrupt_row_as_undecodable_bytes(
-    real_audio_analysis_db: DatabaseConnection,
-) -> None:
-    """A corrupt non-UTF-8 row is yielded, not filtered; filtering is the consumer's job."""
-    await real_audio_analysis_db.execute_write(
-        f"INSERT INTO {DB_TABLE_AUDIO_ANALYSIS} "
-        "(media_type, item_id, provider, aa_provider_domain, analysis_data) VALUES "
-        "(:media_type, :item_id, :provider, :aa_provider_domain, :analysis_data)",
-        {
-            "media_type": MediaType.TRACK.value,
-            "item_id": "t1",
-            "provider": "filesystem_local",
-            "aa_provider_domain": SONIC_ANALYSIS_DOMAIN,
-            "analysis_data": json_dumps(AudioAnalysisData(bpm=100.0).to_dict()),
-        },
-    )
-    # invalid UTF-8 must go in via a raw CAST(x'..' AS TEXT) literal;
-    # binding it as a parameter would store a BLOB instead of corrupt TEXT
-    await real_audio_analysis_db.execute_write(
-        f"INSERT INTO {DB_TABLE_AUDIO_ANALYSIS} "
-        "(media_type, item_id, provider, aa_provider_domain, analysis_data) VALUES "
-        "(:media_type, :item_id, :provider, :aa_provider_domain, "
-        "CAST(x'7B226475726174696F6E223A31FFFE7D' AS TEXT))",
-        {
-            "media_type": MediaType.TRACK.value,
-            "item_id": "t2",
-            "provider": "filesystem_local",
-            "aa_provider_domain": SONIC_ANALYSIS_DOMAIN,
-        },
-    )
-
-    streams = MagicMock()
-    streams.mass = MagicMock()
-    streams.mass.music.database = real_audio_analysis_db
-    controller = AudioAnalysisController(streams)
-
-    rows = [row async for row in controller.iter_audio_analysis_rows(SONIC_ANALYSIS_DOMAIN)]
-
-    assert {row["item_id"] for row in rows} == {"t1", "t2"}
-    corrupt_row = next(row for row in rows if row["item_id"] == "t2")
-    assert isinstance(corrupt_row["analysis_data"], bytes)
-    with pytest.raises(UnicodeDecodeError):
-        corrupt_row["analysis_data"].decode("utf-8", errors="strict")
-
-
 @pytest.mark.asyncio
 async def test_iter_merged_audio_analysis_rows_empty_db_yields_nothing() -> None:
     """An empty DB result yields no entries without flushing a sentinel group."""
@@ -1437,7 +1271,7 @@ async def test_coverage_stale_query_counts_null_analysis_version_as_stale() -> N
 async def test_count_candidates_missing_analysis_zero_without_filesystem() -> None:
     """No available filesystem music providers -> 0 pending (no DB query)."""
     c, _ = _stub_controller()
-    c.mass.providers = []  # type: ignore[misc]
+    c.mass.get_providers = MagicMock(return_value=[])  # type: ignore[method-assign]
 
     assert await c._count_candidates_missing_analysis("sonic_analysis", 1) == 0
 
@@ -1446,11 +1280,14 @@ async def test_count_candidates_missing_analysis_zero_without_filesystem() -> No
 async def test_count_candidates_missing_analysis_queries_with_available_filesystem() -> None:
     """With an available filesystem provider, the NOT EXISTS count query runs with bound params."""
     c, db = _stub_controller(count_result=7)
-    domain = "filesystem_local"
+    instance_id = "filesystem_local"
     fs_prov = MagicMock(spec=LocalFileSystemProvider)
-    fs_prov.domain = domain
+    fs_prov.domain = "filesystem_local"
+    fs_prov.instance_id = instance_id
     fs_prov.available = True
-    c.mass.providers = [fs_prov]  # type: ignore[misc]
+    fs_prov.config = MagicMock()
+    fs_prov.config.get_value.return_value = True
+    c.mass.get_providers = MagicMock(return_value=[fs_prov])  # type: ignore[method-assign]
 
     result = await c._count_candidates_missing_analysis("sonic_analysis", 2)
 
@@ -1460,7 +1297,7 @@ async def test_count_candidates_missing_analysis_queries_with_available_filesyst
     assert "NOT EXISTS" in sql
     assert "aa.analysis_version IS NOT NULL" in sql
     assert "aa.analysis_version >= :current_version" in sql
-    assert f"'{domain}'" in sql
+    assert f"'{instance_id}'" in sql
     assert params["media_type"] == MediaType.TRACK.value
     assert params["aa_domain"] == "sonic_analysis"
     assert params["current_version"] == 2

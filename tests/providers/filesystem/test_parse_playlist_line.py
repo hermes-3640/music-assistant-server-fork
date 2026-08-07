@@ -37,7 +37,7 @@ def provider(
     provider.mass = MagicMock()
     provider.mass.music.tracks.get_library_item_by_prov_id = AsyncMock(return_value=None)
     monkeypatch.setattr(
-        "music_assistant.providers.filesystem_local.async_parse_tags",
+        "music_assistant.providers.filesystem_local.base.async_parse_tags",
         AsyncMock(return_value=MagicMock()),
     )
     track = MagicMock(name="track")
