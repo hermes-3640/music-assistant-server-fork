@@ -60,6 +60,8 @@ jobs:
           ")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $VERSION"
+          # Update pyproject.toml to the resolved version so the built wheel has the correct version
+          sed -i "s/version = \"0.0.0\"/version = \"$VERSION\"/" pyproject.toml
 
       - name: Set build tags
         id: tags
