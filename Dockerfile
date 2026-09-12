@@ -99,6 +99,14 @@ RUN SITE_PACKAGES="$("$VIRTUAL_ENV/bin/python" -c \
     && rmdir /tmp/cliairplay \
     && "$CLIAIRPLAY_BIN_DIR"/cliairplay-linux-* --check
 
+# Install ytmusic_free provider (unofficial YouTube Music provider, no premium required)
+COPY music_assistant/providers/ytmusic_free/ /tmp/ytmusic_free/
+RUN SITE_PACKAGES="$("$VIRTUAL_ENV/bin/python" -c \
+        'import sysconfig; print(sysconfig.get_path("purelib"))')" \
+    && mkdir -p "$SITE_PACKAGES/music_assistant/providers/ytmusic_free" \
+    && cp -r /tmp/ytmusic_free/* "$SITE_PACKAGES/music_assistant/providers/ytmusic_free/" \
+    && rm -rf /tmp/ytmusic_free
+
 # Pre-compile Python bytecode for faster startup
 RUN $VIRTUAL_ENV/bin/python -m compileall -q $VIRTUAL_ENV/lib/python*/site-packages/music_assistant
 
