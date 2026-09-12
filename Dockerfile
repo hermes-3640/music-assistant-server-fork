@@ -88,7 +88,7 @@ RUN REQUIRED_VERSION=$($VIRTUAL_ENV/bin/python -c "import importlib.metadata; pr
 ARG MASS_VERSION
 RUN uv pip install \
     --no-cache \
-    "music-assistant@dist/music_assistant-${MASS_VERSION}-py3-none-any.whl"
+    "music_assistant@dist/music_assistant-${MASS_VERSION}-py3-none-any.whl"
 
 COPY --from=cliairplay /cliairplay /tmp/cliairplay
 RUN SITE_PACKAGES="$("$VIRTUAL_ENV/bin/python" -c \
