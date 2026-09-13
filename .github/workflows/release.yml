@@ -4,7 +4,6 @@ on:
   push:
     branches: [main, dev]
     paths-ignore:
-      - ".github/workflows/*.yml"
       - ".github/instructions/**"
       - "docs/**"
       - "*.md"
@@ -61,14 +60,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $VERSION"
           # Update pyproject.toml to the resolved version so the built wheel has the correct version
-          python3 -c "
-          import tomllib, tomli_w
-          with open('pyproject.toml', 'rb') as f:
-              data = tomllib.load(f)
-          data['project']['version'] = '$VERSION'
-          with open('pyproject.toml', 'wb') as f:
-              tomli_w.dump(data, f)
-          " 2>/dev/null || true
+          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
 
       - name: Set build tags
         id: tags
