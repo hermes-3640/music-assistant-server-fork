@@ -38,30 +38,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get version from pyproject.toml
+      - name: Get version from pyproject.toml and update
         id: version
         run: |
           VERSION=$(python3 -c "
-          import tomllib
-          with open('pyproject.toml', 'rb') as f:
-              data = tomllib.load(f)
-          v = data['project']['version']
-          # If version is 0.0.0, derive from most recent tag or use dev tag
+          import re
+          with open('pyproject.toml') as f:
+              content = f.read()
+          # Extract current version or derive from git tags
+          m = re.search(r'^version = \"([^\"]+)\"', content, re.MULTILINE)
+          v = m.group(1) if m else '0.0.0'
           if v == '0.0.0':
               import subprocess, os
               tags = subprocess.check_output(['git', 'tag', '--sort=-v:refname']).decode().strip().split('\n')
               if tags and tags[0]:
-                  print(tags[0].lstrip('v'))
+                  v = tags[0].lstrip('v')
               else:
-                  print(f'0.0.0.dev{int(os.environ.get(\"GITHUB_RUN_NUMBER\", \"1\"))}')
-          else:
-              print(v)
+                  v = f'0.0.0.dev{int(os.environ.get(\"GITHUB_RUN_NUMBER\", \"1\"))}'
+          # Update pyproject.toml in-place
+          content = re.sub(r'^version = .*$', f'version = \"{v}\"', content, flags=re.MULTILINE)
+          with open('pyproject.toml', 'w') as f:
+              f.write(content)
+          print(v)
           ")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Resolved version: $VERSION"
-          # Update pyproject.toml to the resolved version so the built wheel has the correct version
-          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
-
       - name: Set build tags
         id: tags
         run: |
