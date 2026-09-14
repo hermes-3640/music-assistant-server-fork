@@ -95,7 +95,7 @@ jobs:
           echo "Tags: $TAGS"
 
       - name: Set up Python for building
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
