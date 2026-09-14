@@ -40,6 +40,8 @@ class WebDAVFileSystemProvider(FileSystemProvider):
 
     # WebDAV servers often struggle with 16 parallel tag-parse GETs
     _SYNC_CONCURRENCY = 4
+    # Enable background audio analysis by default for webdav
+    _background_analysis_default_enabled: ClassVar[bool] = True
 
     def __init__(
         self,
