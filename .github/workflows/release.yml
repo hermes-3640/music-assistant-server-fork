@@ -165,8 +165,10 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.repository }}
           permission-administration: read
+        continue-on-error: true
 
       - name: Verify GitHub App identity
+        if: steps.immutable_token.outcome == 'success'
         env:
           APP_SLUG: ${{ steps.immutable_token.outputs.app-slug }}
           INSTALLATION_ID: ${{ steps.immutable_token.outputs.installation-id }}
