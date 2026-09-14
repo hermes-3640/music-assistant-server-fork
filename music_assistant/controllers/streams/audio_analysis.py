@@ -1182,7 +1182,10 @@ class AudioAnalysisController:
             for p in self.mass.get_providers(ProviderType.MUSIC)
             if isinstance(p, FileSystemProvider)
             and p.available
-            and bool(p.config.get_value(bg_key))
+            and (
+                (p.config.get_value(bg_key) is not None and p.config.get_value(bg_key))
+                or getattr(p, "_background_analysis_default_enabled", False)
+            )
         )
 
     async def _find_candidates_missing_analysis(
