@@ -2,13 +2,11 @@ name: Build and Push
 
 on:
   push:
-    branches: [main, dev]
+    branches: [dev]
     paths-ignore:
       - ".github/instructions/**"
       - "docs/**"
       - "*.md"
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag_override:
@@ -28,12 +26,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        channel:
-          - stable
-          - beta
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -66,31 +58,7 @@ jobs:
         id: tags
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          CHANNEL="${{ matrix.channel }}"
-          
-          TAGS=""
-          # Versioned tag (always)
-          TAGS="${TAGS}ghcr.io/${{ env.IMAGE_NAME }}:${VERSION}"
-          
-          if [ "$CHANNEL" = "stable" ]; then
-            TAGS="${TAGS},ghcr.io/${{ env.IMAGE_NAME }}:latest"
-            TAGS="${TAGS},ghcr.io/${{ env.IMAGE_NAME }}:stable"
-          else
-            TAGS="${TAGS},ghcr.io/${{ env.IMAGE_NAME }}:beta"
-          fi
-
-          # On dev branch, also add dev tag
-          if [ "${{ github.ref_name }}" = "dev" ]; then
-            TAGS="${TAGS},ghcr.io/${{ env.IMAGE_NAME }}:dev"
-          fi
-
-          # Release tag if published
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-            TAGS="${TAGS},ghcr.io/${{ env.IMAGE_NAME }}:${TAG#v}"
-            TAGS="${TAGS},ghcr.io/${{ env.IMAGE_NAME }}:latest"
-          fi
-
+          TAGS="ghcr.io/${{ env.IMAGE_NAME }}:${VERSION},ghcr.io/${{ env.IMAGE_NAME }}:dev"
           echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
           echo "Tags: $TAGS"
 
