@@ -90,6 +90,10 @@ RUN uv pip install \
     --no-cache \
     "music_assistant@dist/music_assistant-${MASS_VERSION}-py3-none-any.whl"
 
+# Copy app_secrets.json from the official upstream image (bundled OAuth client IDs)
+COPY --from=ghcr.io/music-assistant/server:stable /app/venv/lib/python3.14/site-packages/music_assistant/helpers/app_secrets.json \
+    /app/venv/lib/python3.14/site-packages/music_assistant/helpers/app_secrets.json
+
 COPY --from=cliairplay /cliairplay /tmp/cliairplay
 RUN SITE_PACKAGES="$("$VIRTUAL_ENV/bin/python" -c \
         'import sysconfig; print(sysconfig.get_path("purelib"))')" \
