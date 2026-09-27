@@ -58,7 +58,7 @@ jobs:
         id: tags
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          TAGS="ghcr.io/${{ env.IMAGE_NAME }}:${VERSION},ghcr.io/${{ env.IMAGE_NAME }}:dev"
+          TAGS="ghcr.io/${{ env.IMAGE_NAME }}:${VERSION},ghcr.io/${{ env.IMAGE_NAME }}:dev,ghcr.io/${{ env.IMAGE_NAME }}:stable,ghcr.io/${{ env.IMAGE_NAME }}:latest"
           echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
           echo "Tags: $TAGS"
 
