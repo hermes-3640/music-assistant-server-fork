@@ -320,9 +320,9 @@ RUN ldconfig && ffmpeg -version && ffprobe -version \
     && PYTHONPATH=/tmp/pyav-check python -c "import av; print(av.library_versions)" \
     && rm -rf /tmp/pyav-check
 
-# Copy widevine client files to container
+# Copy widevine CDM files from the official upstream image (bundled DRM credentials)
 RUN mkdir -p /usr/local/bin/widevine_cdm
-COPY widevine_cdm/* /usr/local/bin/widevine_cdm/
+COPY --from=ghcr.io/music-assistant/server:stable /usr/local/bin/widevine_cdm /usr/local/bin/widevine_cdm
 
 # we need to set (very permissive) permissions to the workdir
 # and /tmp to allow running the container as non-root
