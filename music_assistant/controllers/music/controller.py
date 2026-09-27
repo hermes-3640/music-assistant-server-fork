@@ -1668,6 +1668,17 @@ class MusicController(MusicDatabaseSetupMixin, CoreController):
             for user_id in user_ids:
                 params["userid"] = user_id
                 await self._upsert_playlog(params)
+            # Record a granular 'finished' event for repeat/skip analytics
+            if fully_played and user:
+                await self._record_play_event(
+                    reference,
+                    params,
+                    "finished",
+                    seconds_played or 0,
+                    True,
+                    user.user_id,
+                    queue_id,
+                )
             self._signal_playlog_updated(
                 reference,
                 fully_played=fully_played,
@@ -3287,6 +3298,51 @@ class MusicController(MusicDatabaseSetupMixin, CoreController):
             f"ON CONFLICT({', '.join(PLAYLOG_CONFLICT_KEYS)}) DO UPDATE SET {', '.join(updates)}",
             entry,
         )
+
+    async def _record_play_event(
+        self,
+        item: MediaItemType | ItemMapping,
+        params: dict[str, Any],
+        event_type: str,
+        seconds_played: int,
+        fully_played: bool,
+        userid: str,
+        queue_id: str | None,
+    ) -> None:
+        """
+        Insert a granular play-event row into the play_events table.
+
+        This is a simple append-only INSERT — no conflict handling is
+        needed because the UNIQUE constraint on (item_id, provider,
+        media_type, userid, timestamp) ensures no duplicate events for
+        the same track at the same instant.
+
+        :param item: The media item being played.
+        :param params: Shared playlog params (name, image, artists, etc.).
+        :param event_type: One of 'started', 'finished', 'skipped'.
+        :param seconds_played: Seconds the item was played before this event.
+        :param fully_played: Whether the item completed playback.
+        :param userid: The user this event is attributed to.
+        :param queue_id: The queue that was playing (if applicable).
+        """
+        timestamp = params["timestamp"]
+        event_row = {
+            "item_id": params["item_id"],
+            "provider": params["provider"],
+            "media_type": params["media_type"],
+            "userid": userid,
+            "queue_id": queue_id,
+            "timestamp": timestamp,
+            "seconds_played": seconds_played,
+            "fully_played": fully_played,
+            "event_type": event_type,
+        }
+        try:
+            await self.database.insert(DB_TABLE_PLAY_EVENTS, event_row)
+        except Exception:
+            # If the table does not exist (old schema, or migration pending),
+            # silently skip — the event table is a nice-to-have analytics layer.
+            pass
 
     def _signal_playlog_updated(
         self,

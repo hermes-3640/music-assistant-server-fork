@@ -288,6 +288,23 @@ class MusicDatabaseSetupMixin:
                 [playback_speed] REAL NOT NULL DEFAULT 1.0,
                 UNIQUE(item_id, provider, media_type, userid));"""
         )
+        # Granular per-play event tracking: each start, finish, or skip
+        # is recorded as a separate row so repeat counts and skip rates
+        # are queryable over time. Retained for 90 days, same as playlog.
+        await self.database.execute(
+            f"""CREATE TABLE IF NOT EXISTS {DB_TABLE_PLAY_EVENTS}(
+                [id] INTEGER PRIMARY KEY AUTOINCREMENT,
+                [item_id] TEXT NOT NULL,
+                [provider] TEXT NOT NULL,
+                [media_type] TEXT NOT NULL,
+                [userid] TEXT NOT NULL,
+                [queue_id] TEXT,
+                [timestamp] INTEGER NOT NULL,
+                [seconds_played] INTEGER DEFAULT 0,
+                [fully_played] BOOLEAN DEFAULT 0,
+                [event_type] TEXT NOT NULL,
+                UNIQUE(item_id, provider, media_type, userid, timestamp));"""
+        )
         await self.database.execute(
             f"""CREATE TABLE IF NOT EXISTS {DB_TABLE_ALBUMS}(
                     [item_id] INTEGER PRIMARY KEY AUTOINCREMENT,
