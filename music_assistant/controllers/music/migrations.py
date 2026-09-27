@@ -29,6 +29,7 @@ from music_assistant.constants import (
     DB_TABLE_LOUDNESS_MEASUREMENTS,
     DB_TABLE_PLAYLISTS,
     DB_TABLE_PLAYLOG,
+    DB_TABLE_PLAY_EVENTS,
     DB_TABLE_PODCASTS,
     DB_TABLE_PROVIDER_MAPPINGS,
     DB_TABLE_RADIOS,
@@ -1000,6 +1001,29 @@ async def migrate_database(  # noqa: PLR0915
             )
         except Exception as err:
             if "duplicate column" not in str(err):
+                raise
+
+    if prev_version <= 58:
+        # create the play_events table for granular per-play tracking
+        # (starts, finishes, skips) so repeat counts and skip rates
+        # are queryable over time. Retained for 90 days, same as playlog.
+        try:
+            await database.execute(
+                f"""CREATE TABLE IF NOT EXISTS {DB_TABLE_PLAY_EVENTS}(
+                    [id] INTEGER PRIMARY KEY AUTOINCREMENT,
+                    [item_id] TEXT NOT NULL,
+                    [provider] TEXT NOT NULL,
+                    [media_type] TEXT NOT NULL,
+                    [userid] TEXT NOT NULL,
+                    [queue_id] TEXT,
+                    [timestamp] INTEGER NOT NULL,
+                    [seconds_played] INTEGER DEFAULT 0,
+                    [fully_played] BOOLEAN DEFAULT 0,
+                    [event_type] TEXT NOT NULL,
+                    UNIQUE(item_id, provider, media_type, userid, timestamp))"""
+            )
+        except Exception as err:
+            if "duplicate table" not in str(err):
                 raise
 
     # NOTE: this genre restore runs after the <= 50 step on purpose: it inserts genres
