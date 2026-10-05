@@ -317,6 +317,31 @@ class MusicController(MusicDatabaseSetupMixin, CoreController):
                 category="generic",
                 advanced=True,
             ),
+            # the three entries below hold state kept across restarts; they are declared so a
+            # config save carries them over
+            ConfigEntry(
+                key=CONF_DELETED_PROVIDERS,
+                type=ConfigEntryType.STRING,
+                required=False,
+                multi_value=True,
+                default_value=[],
+                hidden=True,
+            ),
+            ConfigEntry(
+                key=CONF_TRACK_RECONCILIATION_CURSOR,
+                type=ConfigEntryType.INTEGER,
+                required=False,
+                multi_value=True,
+                default_value=[0, 0],
+                hidden=True,
+            ),
+            ConfigEntry(
+                key=CONF_TRACK_RECONCILIATION_RESCAN_DUE,
+                type=ConfigEntryType.BOOLEAN,
+                required=False,
+                default_value=False,
+                hidden=True,
+            ),
         )
 
     async def handle_config_action(
@@ -1511,7 +1536,7 @@ class MusicController(MusicDatabaseSetupMixin, CoreController):
         return library_item
 
     @api_command("music/mark_played", required_scope=Scope.LIBRARY_WRITE)
-    async def mark_item_played(
+    async def mark_item_played(  # noqa: PLR0915
         self,
         media_item: MediaItemType | ItemMapping,
         fully_played: bool = True,
@@ -1522,6 +1547,7 @@ class MusicController(MusicDatabaseSetupMixin, CoreController):
         user_initiated: bool = True,
         skip_artist_ids: list[str] | None = None,
         playback_speed: float | None = None,
+        provider_instance_id: str | None = None,
     ) -> None:
         """
         Mark item as played in playlog.
@@ -1539,6 +1565,7 @@ class MusicController(MusicDatabaseSetupMixin, CoreController):
         :param skip_artist_ids: Library artist ids to skip when crediting an album's artists.
         :param playback_speed: The current playback speed to persist (audiobooks/podcasts).
             If None, any previously stored speed for the item is preserved.
+        :param provider_instance_id: The provider instance reporting the play, whose user it is.
         """
         timestamp = utc_timestamp()
         # we deliberately skip one-off items: sound effects and live inputs whoever owns
@@ -1578,6 +1605,9 @@ class MusicController(MusicDatabaseSetupMixin, CoreController):
         if userid:
             # userid overridden by parameter
             user = await self.mass.webserver.auth.get_user(userid)
+        elif provider_instance_id:
+            # an item merged from several accounts must not be guessed from its first mapping
+            user = await self._get_user_for_provider(provider_instance_id)
         elif session_user := get_current_user():
             # this is the active session user that triggered the action
             user = session_user
@@ -1703,6 +1733,7 @@ class MusicController(MusicDatabaseSetupMixin, CoreController):
         self,
         media_item: MediaItemType | ItemMapping,
         userid: str | None = None,
+        provider_instance_id: str | None = None,
     ) -> None:
         """
         Mark item as unplayed in playlog.
@@ -1710,6 +1741,7 @@ class MusicController(MusicDatabaseSetupMixin, CoreController):
         :param media_item: The media item to mark as unplayed.
         :param all_users: If True, mark the item as unplayed for all users.
         :param userid: The user ID to mark the item as unplayed for (instead of the current user).
+        :param provider_instance_id: The provider instance reporting the change, whose user it is.
         """
         # the playlog is keyed by the identity the caller referenced, not the resolved one
         reference = media_item
@@ -1724,6 +1756,9 @@ class MusicController(MusicDatabaseSetupMixin, CoreController):
         if userid:
             # userid overridden by parameter
             user = await self.mass.webserver.auth.get_user(userid)
+        elif provider_instance_id:
+            # an item merged from several accounts must not be guessed from its first mapping
+            user = await self._get_user_for_provider(provider_instance_id)
         elif session_user := get_current_user():
             # this is the active session user that triggered the action
             user = session_user
