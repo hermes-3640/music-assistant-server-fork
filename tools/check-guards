@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Check that what the fork removed from upstream has not come back.
+#
+#   tools/check-guards
+#
+# The `guards` workflow (.github/workflows/guards.yml) runs this on every push
+# and PR; running it by hand does the same thing. It exits non-zero and names
+# every problem it found, rather than stopping at the first.
+#
+# What it guards today is upstream's CI. We deleted upstream's workflows, its
+# dependabot config and its agent instructions when we forked, and
+# tools/import-upstream freezes .github on imported commits so they stay
+# deleted. If an import ever brings them back, this fails before it reaches
+# main.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+# The only workflows the fork has. Adding one is deliberate: add it here too,
+# so that "a workflow we didn't write" is always a failure.
+allowed_workflows="guards.yml import-upstream.yml release.yml tests.yml"
+
+fail=0
+for path in .github/workflows/*; do
+  [ -e "$path" ] || continue
+  name=${path##*/}
+  case "$name" in
+    *.yml | *.yaml) ;;
+    *) echo "FAIL: $path is not a workflow file" >&2; fail=1; continue ;;
+  esac
+  ok=no
+  for a in $allowed_workflows; do
+    [ "$name" = "$a" ] && ok=yes
+  done
+  if [ "$ok" = no ]; then
+    echo "FAIL: $path is not one of the fork's own workflows ($allowed_workflows)" >&2
+    fail=1
+  fi
+done
+
+# Upstream keeps touching these; they must not come back with an import.
+for path in \
+  .github/dependabot.yml \
+  .github/dependabot.yaml \
+  .github/copilot-instructions.md \
+  .github/instructions \
+  .github/actions \
+  .github/release-notes-config.yml; do
+  if [ -e "$path" ]; then
+    echo "FAIL: $path came back; upstream's CI must not run here (see FORK.md, ground rules)" >&2
+    fail=1
+  fi
+done
+
+[ "$fail" = 0 ] || { echo "guards: FAILED" >&2; exit 1; }
+echo "guards: ok"
