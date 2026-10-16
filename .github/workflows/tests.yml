@@ -1,0 +1,49 @@
+name: tests
+
+# The fork's whole test suite. Every release depends on this workflow:
+# release.yml calls it, so a release happens only on a commit whose tests pass.
+# Upstream's own CI never runs here; this is ours.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  # aiolibdatachannel ships a prebuilt .so that does not link libstdc++ itself,
+  # so the loader has to be told to preload it (upstream's test job does the
+  # same).
+  LD_PRELOAD: libstdc++.so.6
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - run: pip install pre-commit
+      # no-commit-to-branch is a local hook; on CI there is no branch to protect.
+      - run: SKIP=no-commit-to-branch pre-commit run --all-files
+
+  test:
+    runs-on: ubuntu-latest
+    container: python:3.14-slim-trixie
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ffmpeg git build-essential libssl-dev curl
+      - uses: astral-sh/setup-uv@v5
+      - name: Install the Python dependencies
+        run: uv pip install --system --index-strategy unsafe-best-match . '.[test]' -r requirements_all.txt
+      # The whole suite on purpose: no -x and no --maxfail, so every failure is
+      # reported rather than only the first.
+      - name: Run the tests
+        run: pytest -p numpy -n auto --dist loadfile --max-worker-restart=0 --durations 10 tests/

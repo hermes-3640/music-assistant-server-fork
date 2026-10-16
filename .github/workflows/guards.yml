@@ -1,0 +1,20 @@
+name: guards
+
+# Fails if what the fork removed from upstream comes back with an import:
+# upstream's workflows, its dependabot config, its agent instructions. See
+# tools/check-guards and the ground rules in FORK.md.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: tools/check-guards

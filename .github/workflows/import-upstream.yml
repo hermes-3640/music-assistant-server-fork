@@ -1,0 +1,65 @@
+name: import-upstream
+
+# Brings the newest upstream Music Assistant stable release in as commits on
+# the `upstream` branch (upstream's history only, .github frozen by
+# tools/import-upstream) and opens a PR to merge it into main.
+on:
+  schedule:
+    - cron: "0 7 * * *" # daily, 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  actions: write # to re-enable this workflow (see below)
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: import-upstream
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      # GitHub pauses scheduled workflows in public repos after 60 days without
+      # repository activity. Re-enabling the workflow on every run resets that
+      # timer, so it keeps running as long as it runs at least once in 60 days.
+      - name: Keep this schedule from being paused
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable import-upstream.yml --repo "${{ github.repository }}"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import the newest upstream release
+        run: tools/import-upstream
+
+      - name: Open a PR if upstream is ahead of main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git fetch --quiet --tags origin main upstream
+          ahead=$(git rev-list --count origin/main..origin/upstream)
+          if [ "$ahead" -eq 0 ]; then
+            echo "main already has everything from upstream"
+            exit 0
+          fi
+          tag=$(git tag --points-at origin/upstream --list '[0-9]*' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)
+          if [ -z "$tag" ]; then
+            echo "upstream isn't at a release yet; waiting for the next one"
+            exit 0
+          fi
+          title="Import upstream Music Assistant $tag ($ahead commits)"
+          pr=$(gh pr list --head upstream --base main --state open --json number --jq '.[].number')
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" --title "$title"
+            echo "import PR #$pr is already open; it now runs up to $tag"
+            exit 0
+          fi
+          gh pr create --head upstream --base main \
+            --title "$title" \
+            --body "Upstream's newest stable release, imported by tools/import-upstream. Merge with a merge commit, not a squash or rebase, so later imports keep a common base."
