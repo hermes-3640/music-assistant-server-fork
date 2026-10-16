@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Print the fork's release version for a commit on main (default HEAD):
+#
+#   tools/release-version              # -> 2.10.6-3
+#   tools/release-version --pep440     # -> 2.10.6+hermes.3  (what the program calls itself)
+#   tools/release-version <commit>     # for any commit on main's history
+#
+# The version is the upstream release main is built on -- the nearest tag that
+# is exactly X.Y.Z, put there by tools/import-upstream -- plus N: how many
+# commits along main's first-parent line since the merge that brought that
+# release in, counting the merge itself as 1. N restarts at 1 with each import.
+# Needs the full history and tags.
+#
+# Stable releases only: upstream also publishes X.Y.ZbN and X.Y.Z.devN tags,
+# which this ignores, and upstream's tags carry no "v" prefix, so ours don't
+# either.
+set -euo pipefail
+
+case "${1:-}" in
+  -h|--help)
+    sed -n '2,15p' "$0" | sed 's/^#\{1,\} \{0,1\}//'
+    exit 0
+    ;;
+esac
+
+pep440=no
+if [ "${1:-}" = "--pep440" ]; then
+  pep440=yes
+  shift
+fi
+rev=${1:-HEAD}
+
+is_release_tag() { printf '%s' "$1" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; }
+
+# git describe finds the nearest tag reachable from $rev; a glob --match can't
+# express "exactly X.Y.Z" (2.11.0.dev20261011 and 2.11.0b4 match [0-9]*.[0-9]*.[0-9]*),
+# so validate the answer and exclude bad ones until a real release comes back.
+excludes=()
+tag=
+while :; do
+  tag=$(git describe --tags --abbrev=0 "${excludes[@]}" --match '[0-9]*' "$rev" 2>/dev/null) || { tag=; break; }
+  is_release_tag "$tag" && break
+  excludes+=(--exclude "$tag")
+done
+if [ -z "$tag" ]; then
+  echo "No upstream release tag (X.Y.Z) reachable from $rev." >&2
+  exit 1
+fi
+
+n=0
+for c in $(git rev-list --first-parent "$rev"); do
+  git merge-base --is-ancestor "$tag" "$c" || break
+  n=$((n + 1))
+done
+
+if [ "$pep440" = yes ]; then
+  echo "${tag}+hermes.${n}"
+else
+  echo "${tag}-${n}"
+fi
