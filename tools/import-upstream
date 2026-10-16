@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# Bring the newest upstream Music Assistant stable release into the fork.
+#
+#   tools/import-upstream                                # newest stable release
+#   IMPORT_UPSTREAM_TAG=2.10.7 tools/import-upstream      # a particular one
+#
+# It fetches that release into the fork's `upstream` branch (upstream's history
+# only -- nothing of ours), tags it with upstream's own X.Y.Z, and pushes both.
+# Upstream only ever reaches `main` by merging `upstream` in a PR with a merge
+# commit. Stable releases only: an X.Y.Z tag, never X.Y.ZbN or X.Y.Z.devN.
+#
+# .github is frozen: every imported commit keeps the tree its parent had for
+# .github, so an import never overwrites the fork's own CI, and the push never
+# modifies workflow files -- GitHub refuses those from a workflow's own token.
+# A merge into main therefore carries no .github changes at all, so main keeps
+# its own.
+#
+# Normally this runs in CI (.github/workflows/import-upstream.yml); running it
+# by hand does exactly the same thing. The upstream history it needs lives in a
+# temporary bare repository that is deleted afterwards, and the script keeps no
+# state of its own: what has been imported is worked out from the `upstream`
+# branch and the tags that point at it.
+#
+# Environment:
+#   IMPORT_UPSTREAM_URL   git URL of upstream (default music-assistant/server)
+#   IMPORT_UPSTREAM_TAG   import this release instead of the newest
+#   IMPORT_FORK_REMOTE    remote to push to (default origin)
+#   IMPORT_UPSTREAM_BRANCH  branch to import onto (default upstream)
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+upstream_url=${IMPORT_UPSTREAM_URL:-https://github.com/music-assistant/server.git}
+remote=${IMPORT_FORK_REMOTE:-origin}
+branch=${IMPORT_UPSTREAM_BRANCH:-upstream}
+frozen=.github
+
+die() { echo "import-upstream: $*" >&2; exit 1; }
+is_release_tag() { printf '%s' "$1" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; }
+
+case "${1:-}" in
+  -h|--help) sed -n '2,29p' "$0" | sed 's/^#\{1,\} \{0,1\}//'; exit 0 ;;
+esac
+
+if [ -n "${IMPORT_UPSTREAM_TAG:-}" ]; then
+  tag=$IMPORT_UPSTREAM_TAG
+  is_release_tag "$tag" || die "IMPORT_UPSTREAM_TAG=$tag is not a stable X.Y.Z release"
+else
+  tag=$(git ls-remote --tags --refs "$upstream_url" 'refs/tags/*' \
+    | sed -n 's|.*refs/tags/||p' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sort -V | tail -n1)
+  [ -n "$tag" ] || die "no stable X.Y.Z release tags found on $upstream_url"
+fi
+
+# The real upstream commit a tag on `upstream` was imported from. Our tags are
+# annotated and record it, because the tag itself points at the rewritten
+# commit; a tag we made by hand (the commit the branch started at) points at
+# the real commit already.
+real_of_tip() {
+  local tip=$1 t sha
+  for t in $(git tag --points-at "$tip"); do
+    sha=$(git tag -l --format='%(contents:body)' "$t" \
+      | sed -n 's/^upstream-commit: \([0-9a-f]\{7,40\}\)$/\1/p' | head -n1)
+    if [ -n "$sha" ]; then printf '%s' "$sha"; return 0; fi
+    printf '%s' "$(git rev-parse "$t^{commit}")"; return 0
+  done
+  return 1
+}
+
+# New tree for $1: the commit's own, with $frozen replaced by what the already
+# rewritten parent commit $2 has. Uses ls-tree/mktree rather than a temporary
+# index so it works in the bare working copy below.
+build_tree() {
+  local orig=$1 parent=$2 gh
+  if gh=$(git -C "$up" rev-parse -q --verify "$parent:$frozen"); then
+    if git -C "$up" ls-tree "$orig" | awk -F'\t' '$2 == ".github"' | grep -q .; then
+      # Nearly always this: .github is already there, so swap the entry in
+      # place and the listing keeps git's own sort order.
+      git -C "$up" ls-tree "$orig" | awk -F'\t' -v gh="$gh" '
+        $2 == ".github" { print "040000 tree " gh "\t.github"; next }
+        { print }'
+    else
+      # Upstream deleted it in this commit; keep the parent's by re-adding it.
+      git -C "$up" ls-tree "$orig" | awk -F'\t' '$2 != ".github"'
+      printf '040000 tree %s\t.github\n' "$gh"
+    fi
+  else
+    # Nothing frozen to keep yet.
+    git -C "$up" ls-tree "$orig" | awk -F'\t' '$2 != ".github"'
+  fi
+}
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+up=$work/upstream.git
+git init --quiet --bare "$up"
+
+# Fetching just the tag brings its history and nothing past it.
+git -C "$up" fetch --quiet --no-tags "$upstream_url" "+refs/tags/$tag:refs/tags/$tag"
+real_tip=$(git -C "$up" rev-parse "refs/tags/$tag^{commit}")
+
+if git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+  prev_tip=$(git -C "$repo_root" rev-parse "refs/heads/$branch")
+
+  # Already imported? Our tag for a release points at the commit on the branch
+  # that imported it, which is a rewritten commit. (Upstream's own tag of the
+  # same name, inherited from the fork, points at the real commit instead and
+  # is not reachable from ours, so it doesn't count.)
+  if git -C "$repo_root" rev-parse --verify --quiet "refs/tags/$tag" >/dev/null \
+    && git -C "$repo_root" merge-base --is-ancestor "refs/tags/$tag^{commit}" "$prev_tip"; then
+    echo "$tag is already imported."
+    exit 0
+  fi
+
+  prev_real=$(real_of_tip "$prev_tip") \
+    || die "$branch is at $prev_tip, which no release tag points at; refusing to guess what to import from"
+  git -C "$up" fetch --quiet "$repo_root" "+refs/heads/$branch:refs/heads/$branch"
+  git -C "$up" merge-base --is-ancestor "$prev_real" "$real_tip" \
+    || die "$prev_real (last import) is not an ancestor of $tag; upstream history was rewritten"
+
+  new_tip=$prev_tip
+  for c in $(git -C "$up" rev-list --reverse "$prev_real..$real_tip"); do
+    tree=$(build_tree "$c^{tree}" "$new_tip" | git -C "$up" mktree)
+    git -C "$up" show -s --format=%B "$c" > "$work/msg"
+    # The import keeps upstream's authorship; only the tree's .github differs.
+    new_tip=$( \
+      GIT_AUTHOR_NAME="$(git -C "$up" show -s --format=%an "$c")" \
+      GIT_AUTHOR_EMAIL="$(git -C "$up" show -s --format=%ae "$c")" \
+      GIT_AUTHOR_DATE="$(git -C "$up" show -s --format=%aI "$c")" \
+      GIT_COMMITTER_NAME="$(git -C "$up" show -s --format=%cn "$c")" \
+      GIT_COMMITTER_EMAIL="$(git -C "$up" show -s --format=%ce "$c")" \
+      GIT_COMMITTER_DATE="$(git -C "$up" show -s --format=%cI "$c")" \
+        git -C "$up" commit-tree "$tree" -p "$new_tip" -F "$work/msg")
+  done
+
+  git -C "$up" update-ref "refs/heads/$branch" "$new_tip"
+  git -C "$repo_root" fetch --quiet --no-tags "$up" "+refs/heads/$branch:refs/heads/$branch"
+else
+  # First import into a fork with no upstream branch yet: the release's own
+  # history becomes the branch, with nothing rewritten.
+  echo "Creating $branch at $tag (upstream's history, nothing rewritten)."
+  git -C "$repo_root" fetch --quiet --no-tags "$up" \
+    "+refs/tags/$tag:refs/heads/$branch"
+fi
+
+imported=$(git -C "$repo_root" rev-parse "refs/heads/$branch")
+git -C "$repo_root" tag -a --force "$tag" \
+  -m "Import upstream $tag" \
+  -m "upstream-commit: $real_tip" \
+  -m "The upstream $tag release ($upstream_url), imported by tools/import-upstream." \
+  "$imported"
+git -C "$repo_root" push --quiet "$remote" \
+  "refs/heads/$branch:refs/heads/$branch" "refs/tags/$tag"
+
+echo "$tag imported onto $branch ($(git -C "$repo_root" rev-list --count "$prev_real..$real_tip" 2>/dev/null || echo ?) upstream commit(s)).
+Merge it into main with a merge commit:"
+echo "  git checkout main && git merge --no-ff $branch"
