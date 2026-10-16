@@ -1,3 +1,14 @@
+> [!NOTE]
+> **This is our fork of [Music Assistant server](https://github.com/music-assistant/server).**
+>
+> **Why it exists:** upstream won't take the things we run it for — a per-play
+> `play_events` record of starts, skips and finishes, background audio analysis
+> on WebDAV and cloud filesystem libraries, and a YouTube-Music-without-Premium
+> provider. [FORK.md](./FORK.md) has the background, the ground rules, what is
+> still being rebuilt, and how the fork is kept up to date with upstream.
+>
+> The rest of this README is upstream's and hasn't been updated for the fork.
+
 Music Assistant
 ==================================
 
