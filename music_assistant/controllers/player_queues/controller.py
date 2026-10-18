@@ -56,6 +56,7 @@ from music_assistant.constants import (
     MASS_LOGO_ONLINE,
     PLAYLIST_MEDIA_TYPES,
 )
+from music_assistant.constants import DB_TABLE_PLAY_EVENTS
 from music_assistant.controllers.player_queues.autoplay import Autoplay
 from music_assistant.controllers.player_queues.config import (
     core_config_entries,
@@ -880,6 +881,25 @@ class PlayerQueuesController(QueueLoaderMixin, PlaybackTrackerMixin, StreamFeede
         # Publish the seek target before rebuilding the stream to prevent progress snapback.
         queue.elapsed_time = position
         queue.elapsed_time_last_updated = time.time()
+        # Record a 'skipped' event if less than 30 seconds were played.
+        skip_seconds = int(queue.elapsed_time)
+        if queue.current_item and queue.current_item.media_item:
+            if skip_seconds < 30:
+                event_row = {
+                    "item_id": queue.current_item.media_item.item_id,
+                    "provider": queue.current_item.media_item.provider,
+                    "media_type": queue.current_item.media_item.media_type.value,
+                    "userid": self._queue_data[queue_id].userid,
+                    "queue_id": queue_id,
+                    "timestamp": int(time.time()),
+                    "seconds_played": skip_seconds,
+                    "fully_played": False,
+                    "event_type": "skipped",
+                }
+                try:
+                    await self.mass.music.database.insert(DB_TABLE_PLAY_EVENTS, event_row)
+                except Exception:
+                    pass
         self.signal_update(queue_id)
         await self.play_index(queue_id, queue.current_index, seek_position=position)
 
@@ -1038,6 +1058,25 @@ class PlayerQueuesController(QueueLoaderMixin, PlaybackTrackerMixin, StreamFeede
                     ] == queue_item.queue_item_id:
                         # a seek within the item must not keep its position from before
                         prev_state["last_playing_elapsed_time"] = int(queue.elapsed_time)
+                    # Record a granular 'started' event for repeat/skip analytics.
+                    if queue_item.media_item:
+                        event_row = {
+                            "item_id": queue_item.media_item.item_id,
+                            "provider": queue_item.media_item.provider,
+                            "media_type": queue_item.media_item.media_type.value,
+                            "userid": queue_data.userid,
+                            "queue_id": queue_id,
+                            "timestamp": int(time.time()),
+                            "seconds_played": seek_position,
+                            "fully_played": False,
+                            "event_type": "started",
+                        }
+                        try:
+                            await self.mass.music.database.insert(
+                                DB_TABLE_PLAY_EVENTS, event_row
+                            )
+                        except Exception:
+                            pass
                     break
                 except (MediaNotFoundError, AudioError) as err:
                     item_name = queue_item.name if queue_item else "unknown"

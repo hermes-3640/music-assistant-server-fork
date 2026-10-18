@@ -33,6 +33,7 @@ from music_assistant.constants import (
     DB_TABLE_GENRE_MEDIA_ITEM_EXCLUSION,
     DB_TABLE_GENRE_MEDIA_ITEM_MAPPING,
     DB_TABLE_GENRES,
+    DB_TABLE_PLAY_EVENTS,
     DB_TABLE_PLAYLISTS,
     DB_TABLE_PLAYLOG,
     DB_TABLE_PODCASTS,
@@ -294,6 +295,23 @@ class MusicDatabaseSetupMixin:
                 [user_initiated] BOOLEAN NOT NULL DEFAULT 1,
                 [playback_speed] REAL NOT NULL DEFAULT 1.0,
                 UNIQUE(item_id, provider, media_type, userid));"""
+        )
+        # Granular per-play event tracking: each start, finish, or skip
+        # is recorded as a separate row so repeat counts and skip rates
+        # are queryable over time. Retained for 90 days, same as playlog.
+        await self.database.execute(
+            f"""CREATE TABLE IF NOT EXISTS {DB_TABLE_PLAY_EVENTS}(
+                [id] INTEGER PRIMARY KEY AUTOINCREMENT,
+                [item_id] TEXT NOT NULL,
+                [provider] TEXT NOT NULL,
+                [media_type] TEXT NOT NULL,
+                [userid] TEXT NOT NULL,
+                [queue_id] TEXT,
+                [timestamp] INTEGER NOT NULL,
+                [seconds_played] INTEGER DEFAULT 0,
+                [fully_played] BOOLEAN DEFAULT 0,
+                [event_type] TEXT NOT NULL,
+                UNIQUE(item_id, provider, media_type, userid, timestamp));"""
         )
         await self.database.execute(
             f"""CREATE TABLE IF NOT EXISTS {DB_TABLE_ALBUMS}(
