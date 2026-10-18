@@ -68,7 +68,10 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          # The Dockerfile installs dist/music_assistant-${MASS_VERSION}-*.whl,
+          # so MASS_VERSION has to be the version the wheel was built with.
           build-args: |
+            MASS_VERSION=${{ needs.version.outputs.pep440 }}
             BASE_IMAGE_VERSION=${{ env.BASE_IMAGE_VERSION }}
           tags: |
             ${{ env.IMAGE }}:${{ needs.version.outputs.version }}
