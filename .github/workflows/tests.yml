@@ -18,22 +18,36 @@ env:
   # so the loader has to be told to preload it (upstream's test job does the
   # same).
   LD_PRELOAD: libstdc++.so.6
+  # Keep urllib3-future from hijacking the stock urllib3 namespace while the
+  # dependencies install (see pyproject.toml and scripts/setup.sh).
+  URLLIB3_NO_OVERRIDE: "1"
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version-file: .python-version
-      - run: pip install pre-commit
-      # no-commit-to-branch is a local hook; on CI there is no branch to protect.
-      - run: SKIP=no-commit-to-branch pre-commit run --all-files
+      # Every hook runs its tool through scripts/run-in-env.sh, which is `uv
+      # run`, so uv has to be there or every hook dies with "uv: not found".
+      - name: Install uv
+        run: pip install uv
+      - name: Install the Python dependencies
+        # --index-strategy: allow PyPI packages when also using the PyTorch
+        # extra index
+        run: uv pip install --system --index-strategy unsafe-best-match . '.[test]' -r requirements_all.txt
+      - name: Lint
+        # no-commit-to-branch is a local hook; on CI there is no branch to protect.
+        run: SKIP=no-commit-to-branch pre-commit run --all-files
 
   test:
     runs-on: ubuntu-latest
     container: python:3.14-slim-trixie
+    # Backstop: a hung test process should fail in minutes, not at the 6h job cap.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install the system dependencies
@@ -45,5 +59,28 @@ jobs:
         run: uv pip install --system --index-strategy unsafe-best-match . '.[test]' -r requirements_all.txt
       # The whole suite on purpose: no -x and no --maxfail, so every failure is
       # reported rather than only the first.
+      #
+      # Skipped by name, because they test what the fork deleted rather than the
+      # product:
+      # - tests/scripts/test_release_workflow.py and
+      #   tests/test_generate_release_notes.py test upstream's release.yml,
+      #   auto-release.yml, auto-merge-dependency-updates.yml and the
+      #   generate-release-notes action. The fork replaced that automation with
+      #   its own .github/workflows/release.yml and deleted the rest (FORK.md).
+      # - test_check_pr_metadata.py::test_required_items_exist_in_the_real_template
+      #   reads .github/PULL_REQUEST_TEMPLATE.md, which upstream wrote for its
+      #   own review process and the fork does not carry.
       - name: Run the tests
-        run: pytest -p numpy -n auto --dist loadfile --max-worker-restart=0 --durations 10 tests/
+        run: |
+          # The container runs as root, which bypasses file permission bits and
+          # so breaks the tests that exercise permission-denied paths; upstream's
+          # test job runs pytest as an unprivileged user for the same reason.
+          useradd -m tester
+          chown -R tester:tester .
+          setpriv --reuid=tester --regid=tester --init-groups \
+            env HOME=/home/tester \
+            pytest -p numpy -n auto --dist loadfile --max-worker-restart=0 --durations 10 \
+              --ignore=tests/scripts/test_release_workflow.py \
+              --ignore=tests/test_generate_release_notes.py \
+              --deselect=tests/scripts/test_check_pr_metadata.py::test_required_items_exist_in_the_real_template \
+              tests/
