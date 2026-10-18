@@ -125,16 +125,8 @@ this file as a claim that something passes; read that one.
    release. Both are at schema 58, so no migration runs. Even so, anything
    `dev` stored that `2.10.6` doesn't know about (config keys, cache) is
    untested until work item 8 runs against a copy.
-6. **`AGENTS.md` and `CLAUDE.md` are still upstream's**, so an agent working
-   here reads upstream's rules — PRs against `dev`, upstream's branching and
-   review process — instead of this fork's. They are the last piece of work
-   item 3. Writing an agent-instruction file goes through an approval prompt
-   that a headless run cannot answer, so someone has to write these two by
-   hand: `CLAUDE.md` is a plain file containing `@AGENTS.md` (upstream's is a
-   symlink), and `AGENTS.md` says what this fork is, to read `FORK.md` first,
-   the ground rules above, and how to build. `.claude/settings.json` already
-   carries the deny rules.
-   - `VERIFY.md` has the rest of what the fork still cannot show as checked.
+
+`VERIFY.md` has the rest of what the fork still cannot show as checked.
 
 ## Work items, in order
 
@@ -147,8 +139,9 @@ Items 1 to 4 are done; see `VERIFY.md` for what was checked.
    fork and `upstream` is `music-assistant/server`; the duplicate
    `hermes-3640` remote is gone.
 3. ~~Fork setup on `main`~~: upstream's CI deleted, the README noted,
-   `.claude/settings.json`, `shell.nix` and `VERIFY.md` added. Upstream's
-   `AGENTS.md` and `CLAUDE.md` are still upstream's (leftover 6).
+   `.claude/settings.json`, `shell.nix` and `VERIFY.md` added, and
+   `AGENTS.md` and `CLAUDE.md` replaced with the fork's own (`CLAUDE.md` is a
+   plain file containing `@AGENTS.md`; upstream's is a symlink).
 4. ~~Fork tooling and CI~~: `tools/import-upstream`, `tools/release-version`,
    `tools/check-guards`, and the `tests`, `release`, `import-upstream` and
    `guards` workflows.

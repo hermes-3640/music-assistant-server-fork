@@ -101,9 +101,6 @@ test what the fork deleted rather than the product:
 
 ## Not yet checked
 
-- **`AGENTS.md` and `CLAUDE.md`.** Still upstream's. Replacing them is part of
-  work item 3 and is outstanding: writes to agent-instruction files need a
-  person's approval, which a headless run cannot get.
 - **The image has never been started.** It builds and pushes, but nothing has
   run it. The add-on still pulls `:stable`, which the release workflow does not
   publish — that is work item 8 — and the `ytmusic_free`, `app_secrets.json`
