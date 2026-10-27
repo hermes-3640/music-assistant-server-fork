@@ -112,6 +112,15 @@ RUN chmod -R 777 /app \
 
 ##################################################################################################
 
+# Extras stage: only exists to be copied from. The official image is the only
+# public place the semi-proprietary artefacts live (see the COPY block in the
+# final stage). Bump this tag when upstream rotates the bundled keys; the
+# python3.14 path there must match PYTHON_VERSION in Dockerfile.base.
+
+FROM ghcr.io/music-assistant/server:2.10.6 AS upstream-extras
+
+##################################################################################################
+
 # FINAL docker image for music assistant server
 
 FROM ghcr.io/music-assistant/base:$BASE_IMAGE_VERSION
@@ -135,14 +144,10 @@ COPY --from=builder /app /app
 #   * /usr/local/bin/widevine_cdm/{client_id.bin,private_key.pem} is the
 #     Widevine CDM identity the encrypted-streaming providers load from that
 #     hardcoded path (providers/apple_music/constants.py WIDEVINE_BASE_PATH).
-#
-# The python3.14 path must match PYTHON_VERSION in Dockerfile.base. Bump
-# UPSTREAM_EXTRAS_IMAGE when upstream rotates the bundled keys.
-ARG UPSTREAM_EXTRAS_IMAGE="ghcr.io/music-assistant/server:2.10.6"
-COPY --from=${UPSTREAM_EXTRAS_IMAGE} \
+COPY --from=upstream-extras \
     /app/venv/lib/python3.14/site-packages/music_assistant/helpers/app_secrets.json \
     /app/venv/lib/python3.14/site-packages/music_assistant/helpers/app_secrets.json
-COPY --from=${UPSTREAM_EXTRAS_IMAGE} \
+COPY --from=upstream-extras \
     /usr/local/bin/widevine_cdm/ \
     /usr/local/bin/widevine_cdm/
 
