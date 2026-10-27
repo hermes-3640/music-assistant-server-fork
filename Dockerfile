@@ -122,6 +122,35 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # copy the already built /app dir
 COPY --from=builder /app /app
 
+# Semi-proprietary image extras, copied out of the official Music Assistant
+# image instead of being vendored here (neither exists in upstream's git tree
+# and neither may be committed to this one):
+#
+#   * music_assistant/helpers/app_secrets.json carries the bundled provider
+#     credentials -- written by upstream at release time from their private
+#     appvars repo. helpers/app_vars.py looks it up as package data via
+#     importlib.resources; without it every app_var() call falls through to
+#     the empty string, which is why this fork could not authenticate to
+#     Spotify (app_var("spotify_client_id") == "").
+#   * /usr/local/bin/widevine_cdm/{client_id.bin,private_key.pem} is the
+#     Widevine CDM identity the encrypted-streaming providers load from that
+#     hardcoded path (providers/apple_music/constants.py WIDEVINE_BASE_PATH).
+#
+# The python3.14 path must match PYTHON_VERSION in Dockerfile.base. Bump
+# UPSTREAM_EXTRAS_IMAGE when upstream rotates the bundled keys.
+ARG UPSTREAM_EXTRAS_IMAGE="ghcr.io/music-assistant/server:2.10.6"
+COPY --from=${UPSTREAM_EXTRAS_IMAGE} \
+    /app/venv/lib/python3.14/site-packages/music_assistant/helpers/app_secrets.json \
+    /app/venv/lib/python3.14/site-packages/music_assistant/helpers/app_secrets.json
+COPY --from=${UPSTREAM_EXTRAS_IMAGE} \
+    /usr/local/bin/widevine_cdm/ \
+    /usr/local/bin/widevine_cdm/
+
+# Fail the build rather than ship an image that is silently missing them.
+RUN test -s "$VIRTUAL_ENV/lib/python3.14/site-packages/music_assistant/helpers/app_secrets.json" \
+    && test -s /usr/local/bin/widevine_cdm/client_id.bin \
+    && test -s /usr/local/bin/widevine_cdm/private_key.pem
+
 # the /app contents have correct permissions but for some reason /app itself does not.
 # so apply again, but ONLY to the dir (otherwise we increase the size)
 RUN chmod 777 /app
