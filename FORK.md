@@ -149,9 +149,10 @@ Items 1 to 4 are done; see `VERIFY.md` for what was checked.
    Bring its tests over.
 6. **Feature: background analysis on WebDAV and cloud filesystems,** as the
    small flag described in leftover 2, with tests.
-7. **Image:** `ytmusic_free` from a pinned release (leftover 3), plus
-   `app_secrets.json` and Widevine from the official image. Add a guard check
-   that fails the build if any of the three is missing.
+7. **Image:** `ytmusic_free` from a pinned release (leftover 3). The
+   `app_secrets.json` and Widevine half is done: the Dockerfile copies both out
+   of `ghcr.io/music-assistant/server:2.10.6` and fails the build if any of the
+   three files is missing. See `VERIFY.md`.
 8. **Verify, then cut over.**
    - Run against a copy of the live `/data` (leftover 5), and check that
      `play_events` gets created and gets rows.

@@ -99,14 +99,39 @@ test what the fork deleted rather than the product:
 | The default branch is the fork's branch, not upstream's | `gh repo edit --default-branch main`, then `gh repo view --json defaultBranchRef` | `main` (it was `dev`, which work item 8 deletes) |
 | Workflows may open pull requests, which `import-upstream` needs | `gh api repos/.../actions/permissions/workflow` after the update | `{"default_workflow_permissions":"read","can_approve_pull_request_reviews":true}` |
 
+## The image, and what it carries
+
+The fork's image is built from the fork's own git tree, which cannot contain
+`app_secrets.json` (upstream generates it from its private appvars repo at
+release time) or `widevine_cdm/` (gitignored). `helpers/app_vars.py` resolves
+`app_secrets.json` as package data, found nothing, and returned `""` for every
+credential — `spotify_client_id` among them, which is why Spotify auth failed.
+`0ff896bb4` fixes that by declaring `FROM
+ghcr.io/music-assistant/server:2.10.6 AS upstream-extras` and copying
+`app_secrets.json` and `/usr/local/bin/widevine_cdm` out of it into the final
+image, with a `RUN test -s` guard that fails the build if any of
+`app_secrets.json`, `client_id.bin` or `private_key.pem` is missing.
+`8ea9b295a` moves the extras image into its own stage; the first attempt died in
+BuildKit with `variable expansion is not supported for --from`. Checked on
+2026-10-27:
+
+| Check | How | Result |
+| --- | --- | --- |
+| The release workflow | the `release` run for `8ea9b295a` | success — `version`, `tests.test`, `tests.lint`, `publish` and `tag` |
+| The image is published, for both architectures | the run's `publish` job | `ghcr.io/hermes-3640/music-assistant-server-fork:2.10.6-17`, amd64 and arm64 |
+| The add-on runs it | the add-on on hearth.lan | `8c238fd8_hermes_music_assistant` updated `2.10.6-15` -> `2.10.6-17`, state `started` |
+| The credentials are in the container | inside the running container | `helpers/app_secrets.json` present, 1206 bytes |
+| Widevine is in the container | inside the running container | `/usr/local/bin/widevine_cdm/client_id.bin` and `private_key.pem` present |
+| The credentials resolve | `app_var("spotify_client_id")` inside the running container | a 32-character string (it was `""` before, which is what broke Spotify auth) |
+
 ## Not yet checked
 
-- **The image has never been started.** It builds and pushes, but nothing has
-  run it. The add-on still pulls `:stable`, which the release workflow does not
-  publish — that is work item 8 — and the `ytmusic_free`, `app_secrets.json`
-  and Widevine work (work item 7) has not started.
-- **Work items 5 to 8**: `play_events`, the background-analysis flag, the image
-  extras, and the cutover to the new image. None of them are started.
+- **The image has run once, by hand.** It builds, publishes and starts on
+  hearth.lan, but the add-on was moved to `2.10.6-17` explicitly and does not
+  follow the release workflow on its own — that is the cutover, work item 8.
+- **`ytmusic_free`**, the rest of work item 7, has not been brought in.
+- **Work items 5, 6 and 8**: `play_events`, the background-analysis flag, and
+  the cutover. None of them are started.
 - **The import workflow running for real** on a day when upstream has cut a new
   stable release. Its script is tested; the workflow's own branch push and the
   PR it opens are not.
