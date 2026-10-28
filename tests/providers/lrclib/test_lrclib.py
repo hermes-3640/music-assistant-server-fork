@@ -1,11 +1,13 @@
 """Tests for the LRCLIB metadata provider."""
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp import ClientError
 from music_assistant_models.errors import MusicAssistantError
 
+from music_assistant.helpers import throttle_retry
 from music_assistant.helpers.throttle_retry import ThrottlerManager
 from music_assistant.providers.lrclib import SUPPORTED_FEATURES, LrclibProvider
 from tests.common import use_real_create_task
@@ -58,3 +60,48 @@ async def test_get_data_propagates_transient_error(provider: LrclibProvider) -> 
 
     with pytest.raises(MusicAssistantError):
         await provider._get_data(track_name="Song", artist_name="Artist")
+
+
+async def test_get_data_keeps_underlying_error_in_message(
+    provider: LrclibProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The retry log keeps the underlying cause, so an upstream fault is diagnosable."""
+    provider.mass.http_session.get = MagicMock(  # type: ignore[method-assign]
+        return_value=_response_cm(exc=ClientError("network down"))
+    )
+    caplog.set_level(logging.INFO)
+
+    with pytest.raises(MusicAssistantError):
+        await provider._get_data(track_name="Song", artist_name="Artist")
+
+    assert any("network down" in record.getMessage() for record in caplog.records), [
+        record.getMessage() for record in caplog.records
+    ]
+
+
+async def test_get_data_honours_server_retry_after(
+    provider: LrclibProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 429 backs off for at least lrclib.net's Retry-After instead of a guessed delay."""
+    response = MagicMock()
+    response.status = 429
+    response.headers = {"Retry-After": "42"}
+    response.raise_for_status = MagicMock()
+    provider.mass.http_session.get = MagicMock(  # type: ignore[method-assign]
+        return_value=_response_cm(response=response)
+    )
+    # two attempts is enough to observe the backoff the retry helper chooses
+    provider.throttler = ThrottlerManager(rate_limit=1, period=1, retry_attempts=2)
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(throttle_retry.asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(MusicAssistantError):
+        await provider._get_data(track_name="Song", artist_name="Artist")
+
+    assert sleeps, "no backoff sleep was taken before retrying a 429"
+    # Retry-After (42s) is a floor; the helper may add jitter above it
+    assert any(42.0 <= delay <= 47.0 for delay in sleeps), sleeps
