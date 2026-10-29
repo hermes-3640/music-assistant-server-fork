@@ -7,7 +7,6 @@ import pytest
 from aiohttp import ClientError
 from music_assistant_models.errors import MusicAssistantError
 
-from music_assistant.helpers import throttle_retry
 from music_assistant.helpers.throttle_retry import ThrottlerManager
 from music_assistant.providers.lrclib import SUPPORTED_FEATURES, LrclibProvider
 from tests.common import use_real_create_task
@@ -97,7 +96,9 @@ async def test_get_data_honours_server_retry_after(
     async def fake_sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    monkeypatch.setattr(throttle_retry.asyncio, "sleep", fake_sleep)
+    # patch by dotted path: mypy rejects attribute access to a module's
+    # non-exported `asyncio` import
+    monkeypatch.setattr("music_assistant.helpers.throttle_retry.asyncio.sleep", fake_sleep)
 
     with pytest.raises(MusicAssistantError):
         await provider._get_data(track_name="Song", artist_name="Artist")
