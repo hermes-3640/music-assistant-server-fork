@@ -171,8 +171,14 @@ Every push to `main` that passes the tests is a release.
   commit on `main`'s first-parent line, and so on. It restarts at 1 with each
   import. `tools/release-version` works it out from the nearest plain `X.Y.Z`
   tag.
-- **Tag** each release commit `X.Y.Z-N`. Upstream's tags have no `v` prefix,
-  so ours don't either.
+- **Tag** each release commit `X.Y.Z-N`, with no `v` prefix. That is
+  deliberate: the fork's tags share upstream's tag namespace, and upstream
+  tags `X.Y.Z` with no prefix, so ours match it (Pinwheel's upstream tags
+  `vX.Y.Z`, which is why Pinwheel's releases are `vX.Y.Z-N`). Do not
+  rewrite or delete a published tag -- `2.10.6-13` through `2.10.6-20` are
+  unprefixed, and `2.10.6-20` is the image hearth.lan runs.
+  `tools/release-version` only accepts a tag that is exactly `X.Y.Z`, so
+  it skips these `-N` tags and reads upstream's tag alone.
 - **Inside the program,** the version in `pyproject.toml` is
   `X.Y.Z+hermes.N`, which `tools/release-version --pep440` prints. That is a
   valid PEP 440 local version, so it sorts with `X.Y.Z` rather than below it
